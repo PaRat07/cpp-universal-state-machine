@@ -5,6 +5,8 @@
 #include <queue>
 
 
+#include "resume_conditions.h"
+
 template <typename... TaskTs>
 class TimedEventLoop {
  public:
@@ -20,9 +22,15 @@ class TimedEventLoop {
     };
 
     template<typename T>
-    void AddTask(std::pair<time_t, T>&& task)
-            requires (std::is_same_v<T, TaskTs> || ... || true) {
-        tasks_.emplace(task.first, std::move(task.second));
+    void AddTask(WaitUntil<T>&& task)
+            requires (std::is_same_v<T, TaskTs> || ...) {
+        tasks_.emplace(task.cond, std::move(task.to_resume));
+    }
+
+    template<typename T>
+    void AddTask(WaitFor<T>&& task)
+            requires (std::is_same_v<T, TaskTs> || ...) {
+        tasks_.emplace(std::chrono::steady_clock::now() + task.cond, std::move(task.to_resume));
     }
 
     void Resume(auto &&st_mach) {
