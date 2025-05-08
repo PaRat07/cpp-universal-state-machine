@@ -51,6 +51,9 @@ class IOUringEventLoop {
       static constexpr size_t kMaxPeek = 5;
       std::array<io_uring_cqe*, kMaxPeek> cqes;
       int ready_cnt = io_uring_peek_batch_cqe(&ring, cqes.data(), kMaxPeek);
+      if (ready_cnt < 0) {
+        throw std::runtime_error("io_uring_peek_batch_cqe failed");
+      }
       for (io_uring_cqe *copl : cqes | std::views::take(ready_cnt)) {
         reinterpret_cast<UniversalTaskT>(copl->user_data).visit([&st_mach] (auto &task) {
           if constexpr (std::is_same_v<decltype(task.Resume()), void>) {
