@@ -15,35 +15,41 @@
 
 #include <liburing.h>
 
+
 template <typename... TaskTs>
 class IOUringEventLoop {
  public:
-  using UniversalTaskT = std::variant<TaskTs...>;
+  template<typename T>
+  struct CallbackData {
+    ssize_t T::* res_ptr;
+    T value;
+  };
 
-  static constexpr size_t kBufSz = 4096;
+  using UniversalTaskT = std::variant<CallbackData<TaskTs>..., TaskTs...>;
+
+
 
   IOUringEventLoop() {
-    {
-        void* buffer;
-        if (posix_memalign(&buffer, kBufSz, kBufSz) != 0) {
-        throw std::runtime_error("posix_memalign failed");
-        }
-        buf = std::span<std::byte, kBufSz>(reinterpret_cast<std::byte*>(buffer), kBufSz);
-    }
-
     if (io_uring_queue_init(8, &ring, 0) < 0) {
-      free(buf.data());
       throw std::runtime_error("io_uring_queue_init failed");
     }
   }
-
 
   template<typename T>
   void AddTask(AsyncRead<T>&& task)
           requires (std::is_same_v<T, TaskTs> || ...) {
     io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-    io_uring_prep_read(sqe, task.fd, task.cond.data.data(), task.cond.data.size(), 0);
-    sqe->user_data = new UniversalTaskT(std::in_place_type<T>, std::move(task.to_resume));
+    io_uring_prep_read(sqe, task.cond.fd, task.cond.data.data(), task.cond.data.size(), 0);
+    sqe->user_data = std::bit_cast<__u64>(new UniversalTaskT(std::in_place_type<CallbackData<T>>, task.cond.res_ptr, std::move(task.to_resume)));
+    io_uring_submit(&ring);
+  }
+
+  template<typename T>
+  void AddTask(AsyncWrite<T>&& task)
+          requires (std::is_same_v<T, TaskTs> || ...) {
+    io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+    io_uring_prep_write(sqe, task.cond.fd, task.cond.data.data(), task.cond.data.size(), -1);
+    sqe->user_data = std::bit_cast<__u64>(new UniversalTaskT(std::in_place_type<T>, std::move(task.to_resume)));
     io_uring_submit(&ring);
   }
 
@@ -55,21 +61,30 @@ class IOUringEventLoop {
         throw std::runtime_error("io_uring_peek_batch_cqe failed");
       }
       for (io_uring_cqe *copl : cqes | std::views::take(ready_cnt)) {
-        reinterpret_cast<UniversalTaskT>(copl->user_data).visit([&st_mach] (auto &task) {
-          if constexpr (std::is_same_v<decltype(task.Resume()), void>) {
-              task.Resume();
+        std::bit_cast<UniversalTaskT*>(copl->user_data)->visit([&st_mach, res = copl->res] (auto &task) {
+          if constexpr ((!std::same_as<std::remove_cvref_t<decltype(task)>, TaskTs> && ...)) {
+            std::invoke(task.res_ptr, task.value) = res;
+            if constexpr (std::is_same_v<decltype(task.value.Resume()), void>) {
+                task.value.Resume();
+            } else {
+                st_mach.AddTask(task.value.Resume());
+            }
           } else {
-              st_mach.AddTask(task.Resume());
+            if constexpr (std::is_same_v<decltype(task.Resume()), void>) {
+                task.Resume();
+            } else {
+                st_mach.AddTask(task.Resume());
+            }
           }
         });
+        delete reinterpret_cast<UniversalTaskT*>(copl->user_data);
+        io_uring_cqe_seen(&ring, copl);
       }
   }
 
   ~IOUringEventLoop() {
-      std::free(buf.data());
   }
 
  private:
   io_uring ring;
-  std::span<std::byte, kBufSz> buf;
 };

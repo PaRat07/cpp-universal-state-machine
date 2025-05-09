@@ -35,7 +35,7 @@ class TimedEventLoop {
 
     void Resume(auto &&st_mach) {
         while (!tasks_.empty() && tasks_.top().wait_for_time < std::chrono::steady_clock::now()) {
-            auto [_, task] = std::move(tasks_.top());
+            auto [_, task] = std::move(const_cast<TaskHolder&>(tasks_.top()));
             tasks_.pop();
             task.visit([&st_mach] (auto &&task) {
                 if constexpr (std::is_same_v<decltype(task.Resume()), void>) {
@@ -48,5 +48,5 @@ class TimedEventLoop {
     }
 
  private:
-    std::priority_queue<TaskHolder> tasks_;
+    std::priority_queue<TaskHolder, std::vector<TaskHolder>, std::greater<>> tasks_;
 };
