@@ -47,6 +47,10 @@ class TimedEventLoop {
         }
     }
 
+    bool Empty() const {
+        return tasks_.empty();
+    }
+
  private:
     std::priority_queue<TaskHolder, std::vector<TaskHolder>, std::greater<>> tasks_;
 };

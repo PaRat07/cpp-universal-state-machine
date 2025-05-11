@@ -19,7 +19,7 @@ class StateMachine {
 
 
   void RunLoop() {
-      while (true) {
+      while (std::apply([] (auto&&... loops) { return (!loops.Empty() || ...); }, event_loops_)) {
           std::apply([this] (auto&&... event_loops) mutable {
               ([this] (auto &&event_loop) mutable {
                   event_loop.Resume(*this);

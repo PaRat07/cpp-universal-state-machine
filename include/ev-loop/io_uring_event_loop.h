@@ -42,6 +42,7 @@ class IOUringEventLoop {
     io_uring_prep_read(sqe, task.cond.fd, task.cond.data.data(), task.cond.data.size(), 0);
     sqe->user_data = std::bit_cast<__u64>(new UniversalTaskT(std::in_place_type<CallbackData<T>>, task.cond.res_ptr, std::move(task.to_resume)));
     io_uring_submit(&ring);
+    ++cur_in;
   }
 
   template<typename T>
@@ -51,6 +52,7 @@ class IOUringEventLoop {
     io_uring_prep_write(sqe, task.cond.fd, task.cond.data.data(), task.cond.data.size(), -1);
     sqe->user_data = std::bit_cast<__u64>(new UniversalTaskT(std::in_place_type<T>, std::move(task.to_resume)));
     io_uring_submit(&ring);
+    ++cur_in;
   }
 
   void Resume(auto &&st_mach) {
@@ -77,9 +79,13 @@ class IOUringEventLoop {
             }
           }
         });
+        --cur_in;
         delete reinterpret_cast<UniversalTaskT*>(copl->user_data);
         io_uring_cqe_seen(&ring, copl);
       }
+  }
+  bool Empty() const {
+    return cur_in == 0;
   }
 
   ~IOUringEventLoop() {
@@ -87,4 +93,5 @@ class IOUringEventLoop {
 
  private:
   io_uring ring;
+  size_t cur_in;
 };
